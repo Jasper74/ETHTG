@@ -1,0 +1,344 @@
+#'The code in this file will create a dataset based on the raw data
+#'of the LSMS-ISA ERSS wave 2011 with households has observational units 
+#'and variables of interest for technology adoption
+
+#Importing packages
+library(foreign)
+library(ggplot2)
+library(dplyr)
+library(data.table)
+library(reshape2)
+library(psych)
+library(xtable)
+library(gdata)
+
+#Setting the working directory dependent on location of working
+setwd('C:/Users/Jasper/Documents/LEI - internship') #working from home
+
+#Loading in the raw data 
+#-----------------------
+household         <- read.dta("Data/Ethiopia 2011/sect1_hh_w1.dta")
+education         <- read.dta("Data/Ethiopia 2011/sect2_hh_w1.dta")
+fields            <- read.dta("Data/Ethiopia 2011/sect3_pp_w1.dta") 
+crops             <- read.dta("Data/Ethiopia 2011/sect4_pp_w1.dta")
+geo_plot          <- read.dta("Data/Ethiopia 2011/Pub_ETH_PlotGeovariables_Y1.dta") 
+conversion        <- read.dta("Data/Ethiopia 2011/ET_local_area_unit_conversion.dta")
+livestock         <- read.dta("Data/Ethiopia 2011/sect8a_ls_w1.dta")  
+crops_s7          <- read.dta("Data/Ethiopia 2011/sect7_pp_w1.dta")  
+geo_household     <- read.dta("Data/Ethiopia 2011/Pub_ETH_HouseholdGeovariables_Y1.dta")  
+parcel            <- read.dta("Data/Ethiopia 2011/sect2_pp_w1.dta")
+food_consumption  <- read.dta("Data/Ethiopia 2011/sect5a_hh_w1.dta") 
+housing           <- read.dta("Data/Ethiopia 2011/sect9_hh_w1.dta")
+assets            <- read.dta("Data/Ethiopia 2011/sect10_hh_w1.dta")
+off_farm          <- read.dta("Data/Ethiopia 2011/sect11a_hh_w1.dta")
+shocks            <- read.dta("Data/Ethiopia 2011/sect8_hh_w1.dta")
+assistence        <- read.dta("Data/Ethiopia 2011/sect13_hh_w1.dta")
+credita           <- read.dta("Data/Ethiopia 2011/sect14a_hh_w1.dta")
+creditb           <- read.dta("Data/Ethiopia 2011/sect14b_hh_w1.dta")
+
+#'Section 1: Household demographic information
+#'Variables: head age, gender, education, household size
+household_education <- left_join(household, education, all=TRUE)  
+fields_crops = left_join(fields, crops, all=TRUE)
+fields_crops$field_id <- paste(fields_crops$household_id, fields_crops$holder_id, fields_crops$parcel_id, fields_crops$field_id) 
+
+#1.1 Initializing the data set with household IDs, region, and household sizes
+data2011 <- unique(dplyr::select(household, household_id, region=saq01, zone=saq02))
+data2011$region <- as.character(data2011$region)
+data2011$hhsize = table(household$household_id)
+
+#1.2 Add gender, age and education(level) variables to the dataset 
+household_head_data = dplyr::filter(household_education, hh_s1q02=="Head")
+household_head_data = dplyr::select(household_head_data, individual_id, household_id = household_id,
+                         gender = hh_s1q03, age = hh_s1q04_a,  
+                         education = hh_s2q03, edulevel = hh_s2q05)
+household_head_data$gender <- as.character(household_head_data$gender)
+household_head_data$age <- as.numeric(household_head_data$age)
+household_head_data$education <- as.character(household_head_data$education)
+household_head_data$edulevel <- as.numeric(household_head_data$edulevel)
+data2011 <- left_join(data2011, household_head_data, by="household_id", all=TRUE)
+
+#1.2.2 Gender, age and education(level)
+data2011$gender[household_head_data$gender=="Male"] <- 1
+data2011$gender[household_head_data$gender=="Female"] <- 0
+data2011$gender <- as.numeric(data2011$gender)
+data2011$educated[data2011$education=="Yes"] <- 1
+data2011$educated[data2011$education=="No"] <- 0
+data2011$educationlevel <- 0
+data2011$educationlevel[data2011$edulevel>8] <- 1
+data2011$educationlevel[data2011$edulevel>15] <- 2
+data2011$educationlevel[data2011$edulevel>20] <- 1
+data2011$educationlevel[data2011$edulevel>30] <- 2
+data2011$educationlevel[data2011$edulevel>35] <- 0
+
+data2011 <- dplyr::select(data2011, household_id, individual_id, region, zone, hhsize, gender, age, educated, educationlevel) 
+
+#1.5 Roofmaterial 
+housing <- dplyr::select(housing, household_id, hh_s9q06)
+data2011$roofmaterial[housing$hh_s9q06!=1] <- 0
+data2011$roofmaterial[housing$hh_s9q06==1] <- 1
+
+#Section 2: Farm indicators
+#--------------------------------
+#2.1 Creating vectors of households using a type of technology
+irrigation_households <- as.vector(unique(dplyr::filter(fields_crops, pp_s3q12=="Yes")$household_id))
+fertilizer_households <- as.vector(unique(dplyr::filter(fields_crops, pp_s3q14=="Yes")$household_id))
+impseeds_households   <- as.vector(unique(dplyr::filter(fields_crops, pp_s4q11=="Improved")$household_id))
+pestherbfungi         <- as.vector(unique(dplyr::filter(fields_crops, pp_s4q04=="Yes")$household_id))
+# herbicide_households <- as.vector(unique(dplyr::filter(fields_crops, pp_s4q06=="Yes")$household_id)
+# fungicide_households <- as.vector(unique(dplyr::filter(fields_crops, pp_s4q07=="Yes")$household_id)
+
+#Adding technology dummy variables and count variable
+data2011$irrig <- as.numeric(ifelse((data2011$household_id %in% irrigation_households), 1, 0)) 
+data2011$fert  <- as.numeric(ifelse((data2011$household_id %in% fertilizer_households), 1, 0))
+data2011$impseed<- as.numeric(ifelse((data2011$household_id %in% impseeds_households), 1, 0))
+data2011$phf   <- as.numeric(ifelse((data2011$household_id %in% pestherbfungi), 1, 0))
+#  data2011$herb  <- as.numeric(ifelse((data2011$household_id %in% herbicide), 1, 0))
+#  data2011$fung  <- as.numeric(ifelse((data2011$household_id %in% fungicide), 1, 0))
+data2011$tech <- as.numeric(rowSums(data2011[,c("irrig","fert","impseed","phf")]))
+
+#2.2 Plots
+plotcount <- dplyr::select(agriculture, household_id = household_id, field_id, crop_code)
+by_household_plotcount <- group_by(plotcount, household_id)
+plotcounthh <- as.data.frame(summarise(by_household_plotcount,
+                                       plots = length(field_id)))
+rownames(plotcounthh) <- NULL
+
+#2.3 Off-farm sources of income
+off_farm <- dplyr::select(off_farm, household_id, off_farm_participate = hh_s11aq09)
+off_farm$offpart[off_farm$off_farm_participate=="No"] <- 0
+off_farm$offpart[off_farm$off_farm_participate=="Yes"] <- 1
+off_farm <- dplyr::select(off_farm, household_id, offpart)
+
+data2011 <- left_join(data2011, off_farm)
+
+#2.4 Plot distance from household
+by_household <- group_by(geoplot, household_id)
+plotdist <- as.data.frame(summarise(by_household,
+                                    dist_household = round(mean(dist_household),2)))  
+data2011 <- left_join(data2011, plotdist, all=TRUE) 
+
+#Cleaning up, selecting columns from data frames, and adding a unique identifier to fields
+
+techandarea <- dplyr::select(agriculture, household_id, field_id, irrig=pp_s3q12, fert=pp_s3q14, impseeds=pp_s4q11, phf=pp_s4q04, herb=pp_s4q06,
+                             region=saq01, zone=saq02, woreda=saq03, area=pp_s3q02_d, local_unit=pp_s3q02_c, gps=pp_s3q05_c)
+conv <- dplyr::select(conv, region, zone, woreda, local_unit, conversion)
+
+#Merge fields and conversion factors by region, zone, woreda and local_unit
+landsize <- merge(techandarea, conv, by = c("region","zone","woreda","local_unit"), all=TRUE)
+landsize <- arrange(landsize, field_id)
+#Retrieve unique household values (sometimes there are more holders per household, indicating very different areas..)
+landsize <- landsize[!duplicated(landsize$field_id),]
+
+#The difficulty here is that only the FARMS have field sizes
+#So the NAs should only be filled if the household is a farm
+landsize$conversion[is.na(landsize$conversion)] <- 0
+rownames(landsize) <- NULL
+
+#Filling in the conversion units. For 'foreign' units that had no indication of size, an average is used.
+landsize$conversion[landsize$local_unit=="Square Meters"] <- 1
+landsize$conversion[landsize$local_unit=="Hectare"] <- 10000
+landsize$conversion[landsize$local_unit=="Boy" & landsize$crops>0] <- 291.4066
+landsize$conversion[landsize$local_unit=="Timad" & landsize$crops>0] <- 1609.978
+landsize$conversion[landsize$local_unit=="Kert" & landsize$crops>0] <- 1986.144
+landsize$conversion[landsize$local_unit=="Senga" & landsize$crops>0] <- 1197.805
+landsize$conversion[landsize$local_unit=="Other" & landsize$crops>0] <- 1
+landsize$area2 <- round((landsize$area * landsize$conversion),3)/10000
+landsize$gps <- landsize$gps / 10000
+
+landsize$accurate <- ifelse(is.na(landsize$gps), landsize$area2, landsize$gps)
+
+landsize$irrigation[landsize$irrig=="Yes"] <- 1 
+landsize$irrigation[landsize$irrig=="No"] <- 0
+
+landsize$fertilizer[landsize$fert=="Yes"] <- 1
+landsize$fertilizer[landsize$fert=="No"] <- 0
+
+landsize$improvedseeds[landsize$impseeds=="Improved"] <- 1
+landsize$improvedseeds[landsize$impseeds=="Traditional"] <- 0
+landsize$improvedseeds[landsize$impseeds=="Tree crop not planted in this season"] <- 0
+
+landsize$pesticides[landsize$phf=="Yes"] <- 1
+landsize$pesticides[landsize$phf=="No"] <- 0
+
+#  landsize$herbicides[landsize$herb=="Yes"] <- 1
+#  landsize$herbicides[landsize$herb=="No"] <- 0 
+
+landsize$techuse<-0
+landsize$techuse[landsize$irrigation>0 | landsize$fertilizer>0 | landsize$improvedseeds>0 | landsize$pesticides>0] <- 1
+landsize$techs <- rowSums(landsize[,18:21])
+landsize$techarea <- landsize$area * landsize$techuse
+
+landsize$croptechindex <- landsize$techarea*landsize$techs
+
+by_household <- group_by(landsize, household_id)
+
+technologyindex <- as.data.frame(summarise(by_household,
+                                           techindex = sum(croptechindex) / sum(area)))
+
+data2011 <- left_join(data2011, technologyindex, all=TRUE)
+
+
+#Creating a per household data frame with area and gps area
+by_household <- group_by(landsize, household_id)
+farmsize <- as.data.frame(summarise(by_household,
+                                    area = sum(area2),
+                                    areagps = sum(gps),
+                                    area_accurate = sum(accurate)))
+rownames(farmsize) <- NULL
+
+
+data2011 <- left_join(data2011, farmsize, all=TRUE)
+
+
+by_household <- group_by(ls, household_id)
+
+livestock <- as.data.frame(summarise(by_household,
+                                     Cattle = sum(ls_s8aq13a[ls_s8aq00=="CATTLE"]),
+                                     Sheep = sum(ls_s8aq13a[ls_s8aq00=="SHEEP"]),
+                                     Goats = sum(ls_s8aq13a[ls_s8aq00=="GOATS"]),
+                                     Horses = sum(ls_s8aq13a[ls_s8aq00=="HORSES"]),
+                                     Donkeys = sum(ls_s8aq13a[ls_s8aq00=="DONKEYS"]),
+                                     Mules = sum(ls_s8aq13a[ls_s8aq00=="MULES"]),
+                                     Camels = sum(ls_s8aq13a[ls_s8aq00=="CAMELS"]),
+                                     Layinghens = sum(ls_s8aq13a[ls_s8aq00=="LAYING HENS"]),
+                                     Nonlayinghens = sum(ls_s8aq13a[ls_s8aq00=="NON-LAYING HENS"]),
+                                     Cocks = sum(ls_s8aq13a[ls_s8aq00=="COCKS"]),
+                                     Cockerels = sum(ls_s8aq13a[ls_s8aq00=="COCKERELS"]),
+                                     Pullets = sum(ls_s8aq13a[ls_s8aq00=="PULLETS"]),
+                                     Chicks = sum(ls_s8aq13a[ls_s8aq00=="CHICKS"]),
+                                     ExoCattle = sum(ls_s8aq15a[ls_s8aq00=="CATTLE"]),
+                                     ExoSheep = sum(ls_s8aq15a[ls_s8aq00=="SHEEP"]),
+                                     ExoGoats = sum(ls_s8aq15a[ls_s8aq00=="GOATS"]),
+                                     ExoLayinghens = sum(ls_s8aq15a[ls_s8aq00=="LAYING HENS"]),
+                                     ExoNonlayinghens = sum(ls_s8aq15a[ls_s8aq00=="NON-LAYING HENS"]),
+                                     ExoCocks = sum(ls_s8aq15a[ls_s8aq00=="COCKS"]),
+                                     ExoCockerels = sum(ls_s8aq15a[ls_s8aq00=="COCKERELS"]),
+                                     ExoPullets = sum(ls_s8aq15a[ls_s8aq00=="PULLETS"]),
+                                     ExoChicks = sum(ls_s8aq15a[ls_s8aq00=="CHICKS"])))
+
+livestock$LS <- rowSums(livestock[,2:14])
+livestock$lsrm1 <- rowSums(livestock[5:8])
+livestock$lsrm2 <- rowSums(livestock[14])
+livestock$ELS <- livestock$LS - livestock$lsrm1 - livestock$lsrm2
+
+livestock <- dplyr::select(livestock, household_id, LS, ELS)
+data2011 <- left_join(data2011, livestock, all=TRUE)
+
+#---------------------------------------------------
+#Credit, etc
+#---------------------------------------------------            
+geohh <- dplyr::select(geohh, household_id, dist_road, dist_popcenter, dist_market, dist_admctr, anntot_avg, sq1, sq2, sq3, sq4, sq5, sq6, sq7, lat_dd_mod = LAT_DD_MOD, lon_dd_mod = LON_DD_MOD)
+#sq1-7 are character categoricals and will need to be filled in with numbers
+geohh$nutrient <- 0
+geohh$nutrient[geohh$sq1=="No or Slight Constraint"] <- 4
+geohh$nutrient[geohh$sq1=="Moderate Constraint"]     <- 3
+geohh$nutrient[geohh$sq1=="Severe Constraint"]       <- 2
+geohh$nutrient[geohh$sq1=="Very Severe Constraint"]  <- 1
+
+geohh$retention <- 0
+geohh$retention[geohh$sq2=="No or Slight Constraint"] <- 4
+geohh$retention[geohh$sq2=="Moderate Constraint"]     <- 3
+geohh$retention[geohh$sq2=="Severe Constraint"]       <- 2
+geohh$retention[geohh$sq2=="Very Severe Constraint"]  <- 1
+
+geohh$rooting <- 0
+geohh$rooting[geohh$sq3=="No or Slight Constraint"] <- 4
+geohh$rooting[geohh$sq3=="Moderate Constraint"]     <- 3
+geohh$rooting[geohh$sq3=="Severe Constraint"]       <- 2
+geohh$rooting[geohh$sq3=="Very Severe Constraint"]  <- 1
+
+geohh$oxygen <- 0
+geohh$oxygen[geohh$sq4=="No or Slight Constraint"] <- 4
+geohh$oxygen[geohh$sq4=="Moderate Constraint"]     <- 3
+geohh$oxygen[geohh$sq4=="Severe Constraint"]       <- 2
+geohh$oxygen[geohh$sq4=="Very Severe Constraint"]  <- 1
+
+geohh$excesssalt <- 0
+geohh$excesssalt[geohh$sq5=="No or Slight Constraint"] <- 4
+geohh$excesssalt[geohh$sq5=="Moderate Constraint"]     <- 3
+geohh$excesssalt[geohh$sq5=="Severe Constraint"]       <- 2
+geohh$excesssalt[geohh$sq5=="Very Severe Constraint"]  <- 1
+
+geohh$toxicity <- 0
+geohh$toxicity[geohh$sq6=="No or Slight Constraint"] <- 4
+geohh$toxicity[geohh$sq6=="Moderate Constraint"]     <- 3
+geohh$toxicity[geohh$sq6=="Severe Constraint"]       <- 2
+geohh$toxicity[geohh$sq6=="Very Severe Constraint"]  <- 1
+
+geohh$workability <- 0
+geohh$workability[geohh$sq7=="No or Slight Constraint"] <- 4
+geohh$workability[geohh$sq7=="Moderate Constraint"]     <- 3
+geohh$workability[geohh$sq7=="Severe Constraint"]       <- 2
+geohh$workability[geohh$sq7=="Very Severe Constraint"]  <- 1
+
+geohh$soilsum <- rowSums(geohh[,16:22])
+geohh$soilsum <- geohh$soilsum/7
+
+geohh <- dplyr::select(geohh, household_id, dist_road, dist_popcenter, dist_market, dist_admctr, anntot_avg, soilsum, lat_dd_mod, lon_dd_mod)
+
+data2011 <- left_join(data2011, geohh, all=TRUE)
+
+by_hh_slope <- group_by(geoplot, household_id)
+slopes <- as.data.frame(summarise(by_hh_slope,
+                                  avgslope = mean(plot_srtmslp)))
+
+data2011 <- left_join(data2011, slopes)
+
+#---------------------------------------------------------------
+#Construct table per household with the different types of crops
+#Helps determine cash crops, subsistence farmers etc
+#---------------------------------------------------------------
+
+croptypes <- dplyr::select(crops, household_id, crop_name)
+names(croptypes) <- c("household_id", "item")
+croptypes$value <- 1
+c <- dcast(croptypes, household_id ~ item, value.var="value")
+names(c) <- make.names(names(c))
+c <- dplyr::select(c, household_id, AVOCADOS, BANANAS, BARLEY, CASSAVA, CHAT, CHICK.PEAS, COFFEE, ENSET, FIELD.PEAS, GARLIC, GESHO, GODERE, GREEN.PEPPER, GROUND.NUTS, GUAVA, HARICOT.BEANS, HORSE.BEANS, KALE, LEMONS, LENTILS, LINESEED, MAIZE, MANGOS, MILLET, NUEG, ORANGES, PAPAYA, POTATOES, PUMPKINS, RAPE.SEED, RED.PEPPER, SESAME, SORGHUM, SUGAR.CANE, SWEET.POTATO, TEFF, VETCH, WHEAT)
+c$sum <- rowSums(c[2:39])
+c <- c[-1,]
+rownames(c) <- NULL
+
+#data <- left_join(data, c, all=TRUE)
+
+a <- dplyr::select(parcel, household_id, parcel_id, pp_s2q03, pp_s2q02)
+b <- dcast(a, household_id ~ pp_s2q03, fun.aggregate= mean, na.rm=TRUE)
+b[is.na(b)] <- 0
+b[,2:8] <- round(b[,2:8], 2)
+names(b) <- make.names(names(b))
+
+#It would probably be better to use ratios of owned fields here, where 1 is total ownership and 
+#0 is complete lack of ownership
+
+b$ownership <- (b[,2] + b[,3])  / rowSums(b[,2:8])
+b <- dplyr::select(b, household_id, ownership)  
+data2011 <- left_join(data2011, b, all=TRUE)
+
+#Information about the self-sufficiency of farms and the extent to which the purchase foods for their own consumption
+crops7 <- crops7[!duplicated(crops7$household_id),]
+
+by_household = group_by(crops7, household_id)
+cropmisc <- as.data.frame(summarise(by_household,     
+                                    croprotate = sum(pp_s7q01),
+                                    extension = sum(pp_s7q04),
+                                    credit = sum(pp_s7q06),
+                                    advise = sum(pp_s7q08),
+                                    oxen = sum(pp_s7q11))) 
+cropmisc$extension[cropmisc$extension==2] <- 0
+cropmisc$credit[cropmisc$credit==2] <- 0
+cropmisc$advise[cropmisc$advise==2] <- 0
+cropmisc$croprotate[cropmisc$croprotate==2] <- 0
+cropmisc <- cropmisc[-1,]
+rownames(cropmisc) <- NULL
+
+data2011 <- left_join(data2011, cropmisc, all=TRUE)  
+
+shocks      <- dcast(shocks, household_id ~ hh_s8q00, value.var="hh_s8q01")
+names(shocks) <- c("household_id","head_death","hh_ilness","hh_jobloss","drought","flood","landslide","heavy_rain","other_cropdmg","pfood_fall","pfood_rise","pinput_rise","livestock_death","fire","theft","land_loss","displace","local_unrest","other")
+data2011 <- left_join(data2011, shocks)
+
+data2011 <- data2011[,1:60]
+
+keep(data2011, sure=TRUE)
+

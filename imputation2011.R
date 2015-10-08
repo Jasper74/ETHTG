@@ -1,11 +1,9 @@
-#Imputation method for Ethiopia 2011 data
-#repeat for 2013 with same variables
-#--------------------------------------------------------------------------------------------
+#'Multiple imputation code: obtain 2011 GPS areas through multiple imputation as proposed 
+#'by Palacios-Lopez & Djima (paper not available online)
+
 library(foreign)
 library(mice)
-#------------------------
-#Loading in all the data
-#------------------------
+
 setwd('C:/Users/Jasper/Documents/LEI - internship') #working from home
 setwd('M:/My Documents/LEI - internship')           #working from LEI
 
@@ -20,7 +18,7 @@ conv         <- read.dta("Data/Ethiopia 2011/ET_local_area_unit_conversion.dta")
 flds <- left_join(flds, parcel)
 flds$plot_id <- paste(flds$holder_id, flds$parcel_id, flds$field_id, sep="")
 
-field_area <- dplyr::select(flds, household_id, field_id, plot_id, holder_id, irrig=pp_s3q12, fert=pp_s3q14, pop_weight=pw,
+field_area <- dplyr::select(flds, household_id, parcel_id, field_id, plot_id, holder_id, irrig=pp_s3q12, fert=pp_s3q14, pop_weight=pw,
                              region=saq01, zone=saq02, woreda=saq03, area=pp_s3q02_d, local_unit=pp_s3q02_c, gps=pp_s3q05_c)
 field_area <- arrange(merge(field_area, conv, by = c("region","zone","woreda","local_unit"), all=TRUE), plot_id)
 field_area <- unique(field_area[!duplicated(field_area$plot_id),])
@@ -38,8 +36,8 @@ field_area$conversion[field_area$local_unit=="Other" & field_area$crops>0] <- 1
 field_area$area2 <- round((field_area$area * field_area$conversion),3)
 
 #Creating imputation data frame
-imputation <- data.frame(household_id = field_area$household_id, holder_id = field_area$holder_id, plot_id = field_area$plot_id,
-                         field_id = field_area$field_id,         sr_area = field_area$area2/10000,
+imputation <- data.frame(household_id = field_area$household_id, holder_id = field_area$holder_id, plot_id = field_area$plot_id, region = field_area$region,
+                         parcel_id = field_area$parcel_id,       field_id = field_area$field_id,         sr_area = field_area$area2/10000,
                          gps      = field_area$gps/10000,        weight = field_area$pop_weight)
 
 #Plot manager characteristics
@@ -342,5 +340,5 @@ imputation_original <- left_join(imputation_original, complete, by="obs_id_origi
 #                       sr_area_agehead+	sr_area_yrseduc+	sr_area_plot_own+	sr_area_plot_rent+	sr_area_plot_fall, data=imputation)
 
 
-c <- dplyr::select(imputation_original, household_id, plot_id, sr_area, gps, area)
-write.csv(c, "imputed_area.csv", row.names=TRUE)
+c <- dplyr::select(imputation_original, household_id, holder_id, parcel_id, field_id, plot_id, region, sr_area, gps, area)
+write.csv(c, "imputed_area2011.csv", row.names=TRUE)

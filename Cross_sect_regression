@@ -1,33 +1,10 @@
-library(MASS)
-library(AER)
-library(plm)
-library(pglm)
-library(polycor)
-library(stargazer)
-library(car)
-library(dplyr)
-setwd('M:/My Documents/LEI - internship')           #working from LEI
-
-data <- read.csv('R-Output/data_corrected.csv')[,3:37]
-#data2011_saved <- read.csv('R-Output/data2011.csv')[2:36]
-#data2011_saved$household_id <-  as.character(ifelse((data2011_saved$region %in% c("Harari", "Gambella", "Dire Dawa")), data2011_saved$household_id, paste(0,data2011_saved$household_id,sep="")))
-#savedata2013 <- read.csv('R-Output/data2013.csv')[2:36]
-#savedata2013$household_id <-  as.character(ifelse((savedata2013$region %in% c("Harari", "Gambella", "Dire Dawa")), savedata2013$household_id, paste(0,savedata2013$household_id,sep="")))
-
-data$household_id <- as.character(ifelse((data$region %in% c("Harari", "Gambella", "Dire Dawa")), data$household_id, paste(0,data$household_id,sep="")))
-data2011 <- dplyr::filter(data, year=="2011")
-data2013 <- dplyr::filter(data, year=="2013")
-
-regdata2011 <- plm.data(data2011, c("household_id", "year"))
-regdata2013 <- plm.data(data2013, c("household_id", "year"))
-
-fit11 <- glm(tech_count ~ 
+clogit0_1234 <- glm(as.numeric(techsplit0_1234) ~ 
                age 
              + gender  
              + educationlevel 
              + hhsize 
-             + roofmaterial 
-             + television 
+             #+ roofmaterial 
+             #+ television 
              + area 
              + LS
              + dist_household 
@@ -36,19 +13,47 @@ fit11 <- glm(tech_count ~
              + ownership_index 
              + extension  
              + credit  
-             + advise 
              + oxen 
-             + dist_road 
+             #+ dist_road 
              + dist_market 
              + anntot_avg 
-             + average_slope 
+             #+ average_slope 
              + nutrient 
-             ,data = regdata2011 
-             #, effect = "twoways"         
-             , family = poisson,         
-             #, method = "bfgs"          
+             ,data = regdata2013 
+            # , effect = "individual"         
+            # , family = "poisson"     
+             ,family = binomial(link = "logit")
+            # , method = "bfgs"          
              #, model="within"
 )
+summary()
 
-write.csv(data2013, 'R-Output/data2013_corrected.csv')
-write.csv(data2011, 'R-Output/data2011_corrected.csv')
+
+ordlogit1.0 <- polr(tech_count ~ 
+                     age 
+                   + gender  
+                   + educationlevel 
+                   + hhsize 
+                   #+ roofmaterial 
+                   #+ television 
+                   + area 
+                   + LS
+                   + dist_household 
+                   + croprotate 
+                   + offpart 
+                   + ownership_index 
+                   + extension  
+                   + credit  
+                   + oxen 
+                   #+ dist_road 
+                   + dist_market 
+                   + anntot_avg 
+                   #+ average_slope 
+                   + nutrient 
+                   ,data = regdata2013 
+                   #, effect = "twoways"         
+                   #, family = poisson     
+                   #,family = ordinal(link = "logit")
+                   , method = "logistic"          
+                   #, model="within"
+)

@@ -180,35 +180,30 @@ rownames(off_farm) <- NULL
 #'to the household, even when they are on the same parcel as other fields that indicate substantially lower distances.
 #'This is solved by looking at whether an outlier 
 #'
-geo_plot         <- read.dta("Data/Ethiopia 2013/Geodata/Pub_ETH_PlotGeovariables_Y2.dta")
-geo_plot$plot_id <- paste(geo_plot$holder_id, geo_plot$parcel_id, geo_plot$field_id)
+geo_plot13         <- read.dta("Data/Ethiopia 2013/Geodata/Pub_ETH_PlotGeovariables_Y2.dta")
+geo_plot13$plot_id <- paste(geo_plot13$household_id, geo_plot13$parcel_id, geo_plot13$field_id)
 
 #Function to filter out outliers
-households <- unique(geo_plot$household_id)
-output_plotdist <- list()
+households <- unique(geo_plot13$household_id)
+output_plotdist13 <- list()
 
 for (hh in households){
-  a <- dplyr::filter(geo_plot, geo_plot$household_id==hh)
+  a <- dplyr::filter(geo_plot13, geo_plot13$household_id==hh)
   b <- a$dist_household 
   lim <- quantile(b, probs=0.9, na.rm=TRUE)
   
   b[b>lim] = mean(b[!b>lim], na.rm=TRUE)  
   a$dist_household <- b  
-  output_plotdist <- rbind(output_plotdist, a)
+  output_plotdist13 <- rbind(output_plotdist13, a)
 }
 
-lim <- quantile(output_plotdist$dist_household, probs=0.999, na.rm=T)
-output_plotdist$dist_household[output_plotdist$dist_household>lim] <- lim
-
-output_plotdist <- dplyr::filter(output_plotdist, dist_household<400)
-
-by_household <- group_by(output_plotdist, household_id)
-plotdist <- as.data.frame(summarise(by_household,
+by_household <- group_by(output_plotdist13, household_id)
+plotdist13 <- as.data.frame(summarise(by_household,
                                     dist_household = round(mean(dist_household),2)))
-plotdist <- arrange(plotdist)[-1,]
+plotdist13 <- arrange(plotdist13)[-1,]
 rownames(plotdist) <- NULL
 
-plotdist <- dplyr::filter(plotdist, dist_household<400)
+
 
 #'Roof material indicates the wealth of a household through a dummy variable taking the value
 #'of 1 when the roof consists of a corrugated iron sheet, concrete, asbestos, bricks
@@ -269,9 +264,6 @@ livestock$LS <- rowSums(livestock[,2:14])
 livestock <- dplyr::select(livestock, household_id, LS)
 livestock <- livestock[-1,]
 
-lim <- quantile(livestock[,'LS'], probs = 0.99, na.rm=TRUE)
-livestock[,'LS'][livestock[,'LS'] > lim] <- lim 
-
 #3.6 Soil quality indicators
 geo_household     <- read.dta("Data/Ethiopia 2013/Geodata/Pub_ETH_HouseholdGeovars_Y2.dta")
 geo_household <- dplyr::select(geo_household, household_id, dist_road, dist_popcenter, dist_market, dist_admctr, pop_density, anntot_avg, sq1, lat_dd_mod, lon_dd_mod)
@@ -289,7 +281,7 @@ geo_household$household_id <- as.character(geo_household$household_id)
 
 geo_household$household_id <- paste(0,geo_household$household_id, sep="")
 
-geo_household <- dplyr::select(geo_household, household_id, dist_road, dist_popcenter, dist_market, dist_admctr, dist_admctr, 
+geo_household <- dplyr::select(geo_household, household_id, dist_road, dist_market, 
                        anntot_avg, nutrient, lat_dd_mod, lon_dd_mod)
 
 by_hh_slope <- group_by(geo_plot, household_id)
@@ -305,6 +297,16 @@ parcel            <- read.dta("Data/Ethiopia 2013/Post-Planting/sect2_pp_w2.dta"
 
 parcel_data <- dplyr::select(parcel, holder_id, household_id, parcel_id, pp_s2q02, pp_s2q03, pp_s2q04)
 
+areas <- read.csv('imputed_area2013.csv')
+regions_nozero <- c("Harari", "Gambella", "Dire Dawa")
+areas$household_id <- paste(0,areas$household_id,sep="")
+areas$holder_id <- ifelse((areas$region %in% regions_nozero), areas$holder_id, paste(0,areas$holder_id,sep=""))
+areas$plot_id <- as.character(paste(areas$holder_id, areas$parcel_id, areas$field_id))
+
+areas <- dplyr::select(areas, holder_id, parcel_id, area)
+
+parcel_data <- left_join(areas, parcel_data, by=c("holder_id", "parcel_id"))
+
 parcel_data$land_ownership[parcel_data$pp_s2q04=="Yes" | parcel_data$pp_s2q03==1 | parcel_data$pp_s2q03==2 |
                              parcel_data$pp_s2q03=="Granted by Local Leaders" | parcel_data$pp_s2q03=="Inherited"] <- 1
 parcel_data$land_ownership[parcel_data$pp_s2q04=="No" | parcel_data$pp_s2q03=="Rent" | parcel_data$pp_s2q03=="Borrowed for Free" |
@@ -312,9 +314,9 @@ parcel_data$land_ownership[parcel_data$pp_s2q04=="No" | parcel_data$pp_s2q03=="R
 
 by_household_parcel <- group_by(parcel_data, household_id)
 land_ownership <- as.data.frame(summarise(by_household_parcel,
-                                          parcels = length(household_id),
-                                          ownership_parcels = sum(land_ownership),
-                                          ownership_index = ownership_parcels / parcels))
+                                          area_ownership =  sum(area[land_ownership==1]),
+                                          area_total = sum(area)))
+land_ownership$ownership_index <- land_ownership$area_ownership / land_ownership$area_total
 land_ownership <- dplyr::select(land_ownership, household_id, ownership_index)
 land_ownership <- land_ownership[-1,]
 rownames(land_ownership) <- NULL
@@ -340,10 +342,22 @@ cropmisc <- cropmisc[-1,]
 
 #Shocks
 shocks        <- read.dta("Data/Ethiopia 2013/Household/sect8_hh_w2.dta")
-shocks        <- dcast(shocks, household_id ~ hh_s8q00, value.var="hh_s8q01")
-names(shocks) <- c("household_id","head_death","hh_ilness","hh_jobloss","drought","flood","landslide","heavy_rain","other_cropdmg","pfood_fall","pfood_rise","pinput_rise","livestock_death","fire","theft","land_loss","displace","local_unrest","other")
-shocks        <- shocks[-1,]
-rownames(shocks) <- NULL 
+
+shocks      <- dcast(shocks, household_id2 + household_id ~ hh_s8q0a, value.var="hh_s8q01")
+names(shocks) <- c("household_id2", "household_id","head_death","hh_ilness","hh_jobloss","drought","flood","landslide","heavy_rain","other_cropdmg","pfood_fall","pfood_rise","pinput_rise","livestock_death","fire","theft","land_loss","displace","local_unrest","other")
+shocks <- dplyr::select(shocks, household_id, drought, flood, heavy_rain, pinput_rise)
+shocks$drought[shocks$drought=="Yes"] <- 1
+shocks$drought[shocks$drought=="No"] <- 0
+shocks$flood[shocks$flood=="Yes"] <- 1
+shocks$flood[shocks$flood=="No"] <- 0
+shocks$heavy_rain[shocks$heavy_rain=="Yes"] <- 1
+shocks$heavy_rain[shocks$heavy_rain=="No"] <- 0
+shocks$pinput_rise[shocks$pinput_rise=="Yes"] <- 1
+shocks$pinput_rise[shocks$pinput_rise=="No"] <- 0
+
+shocks <- arrange(shocks, household_id)
+shocks <- shocks[1487:5262,]
+rownames(shocks) <- NULL
 
 #Household size
 hhsize = as.data.frame(table(household_education$household_id))
@@ -357,7 +371,7 @@ data2013 <- left_join(data2013, household_head_data, all=TRUE)
 data2013 <- left_join(data2013, housing, all=TRUE)           #Housing (roofmaterial)
 data2013 <- left_join(data2013, tv, all=TRUE)                #Television
 data2013 <- left_join(data2013, livestock, all=TRUE)         #Livestock ownership
-data2013 <- left_join(data2013, plotdist, all=TRUE)          #Average distance from household to the plot
+data2013 <- left_join(data2013, plotdist13, all=TRUE)          #Average distance from household to the plot
 data2013 <- left_join(data2013, technology_data, all=TRUE)   #Technology dummy and count variables
 data2013 <- left_join(data2013, area_technology, all=TRUE)   #Technology area index
 data2013 <- left_join(data2013, geo_household, all=TRUE)     #Soil quality indicators
@@ -365,7 +379,8 @@ data2013 <- left_join(data2013, slopes, all=TRUE)            #Average slope of t
 data2013 <- left_join(data2013, land_ownership, all=TRUE)    #Land ownership
 data2013 <- left_join(data2013, cropmisc, all=TRUE)          #Extension services, credit services, advisory services, oxen
 data2013 <- left_join(data2013, off_farm)                    #Off-farm participation
-#data2013 <- left_join(data2013, shocks)                      #Shocks
+data2013 <- left_join(data2013, plotcounthh)
+data2013 <- left_join(data2013, shocks)                      #Shocks
 
 data2013 <- arrange(data2013, household_id)
 data2013 <- data2013[49:3824,]
